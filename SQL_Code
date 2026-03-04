@@ -1,0 +1,158 @@
+drop table if exists zepto;
+
+create table zepto (
+sku_id SERIAL PRIMARY KEY,
+category VARCHAR(120),
+name VARCHAR(150) NOT NULL,
+mrp NUMERIC(8,2),
+discountPercent NUMERIC(5,2),
+availableQuantity INTEGER,
+discountedSellingPrice NUMERIC(8,2),
+weightInGms INTEGER,
+outOfStock BOOLEAN,	
+quantity INTEGER
+);
+
+-- ============================================================
+--                     DATA EXPLORATION
+-- ============================================================
+
+-- Count of rows
+SELECT COUNT(*) FROM zepto;
+
+-- Sample data
+SELECT * FROM zepto
+LIMIT 10;
+
+-- Null values check
+SELECT * FROM zepto
+WHERE name IS NULL
+OR category IS NULL
+OR mrp IS NULL
+OR discountPercent IS NULL
+OR discountedSellingPrice IS NULL
+OR weightInGms IS NULL
+OR availableQuantity IS NULL
+OR outOfStock IS NULL
+OR quantity IS NULL;
+
+-- Different product categories
+SELECT DISTINCT category
+FROM zepto
+ORDER BY category;
+
+-- Products in stock vs out of stock
+SELECT outOfStock, COUNT(sku_id)
+FROM zepto
+GROUP BY outOfStock;
+
+-- Product names present multiple times (different SKUs)
+SELECT name, COUNT(sku_id) AS "Number of SKUs"
+FROM zepto
+GROUP BY name
+HAVING COUNT(sku_id) > 1
+ORDER BY COUNT(sku_id) DESC;
+
+-- ============================================================
+--                      DATA CLEANING
+-- ============================================================
+
+-- Products with price = 0
+SELECT * FROM zepto
+WHERE mrp = 0 OR discountedSellingPrice = 0;
+
+DELETE FROM zepto
+WHERE mrp = 0;
+
+-- Convert paise to rupees
+UPDATE zepto
+SET mrp = mrp / 100.0,
+    discountedSellingPrice = discountedSellingPrice / 100.0;
+
+SELECT mrp, discountedSellingPrice FROM zepto;
+
+-- ============================================================
+--                     BUSINESS ANALYSIS
+-- ============================================================
+
+-- Q1. Which categories have the most out-of-stock products?
+--     Helps the business identify which categories need urgent restocking.
+SELECT category,
+       COUNT(*) AS out_of_stock_count
+FROM zepto
+WHERE outOfStock = TRUE
+GROUP BY category
+ORDER BY out_of_stock_count DESC;
+
+
+-- Q2. What is the average MRP and average selling price per category?
+--     Useful for understanding the pricing landscape across product categories.
+SELECT category,
+       ROUND(AVG(mrp), 2) AS avg_mrp,
+       ROUND(AVG(discountedSellingPrice), 2) AS avg_selling_price,
+       ROUND(AVG(mrp) - AVG(discountedSellingPrice), 2) AS avg_price_drop
+FROM zepto
+GROUP BY category
+ORDER BY avg_mrp DESC;
+
+
+-- Q3. Find products where the discount is 0% but they are still out of stock.
+--     These are high-demand products selling at full price — good candidates for a price increase.
+SELECT DISTINCT name, category, mrp, discountPercent
+FROM zepto
+WHERE discountPercent = 0 AND outOfStock = TRUE
+ORDER BY mrp DESC;
+
+
+-- Q4. Which are the top 10 heaviest products still available in stock?
+--     Useful for logistics and delivery cost planning.
+SELECT DISTINCT name, category, weightInGms, discountedSellingPrice
+FROM zepto
+WHERE outOfStock = FALSE
+ORDER BY weightInGms DESC
+LIMIT 10;
+
+
+-- Q5. What percentage of products in each category are out of stock?
+--     Gives a stockout rate per category to prioritize restocking efforts.
+SELECT category,
+       COUNT(*) AS total_products,
+       SUM(CASE WHEN outOfStock = TRUE THEN 1 ELSE 0 END) AS out_of_stock,
+       ROUND(
+           100.0 * SUM(CASE WHEN outOfStock = TRUE THEN 1 ELSE 0 END) / COUNT(*), 2
+       ) AS stockout_percentage
+FROM zepto
+GROUP BY category
+ORDER BY stockout_percentage DESC;
+
+
+-- Q6. Find all products where the discount is higher than the category's average discount.
+--     Identifies aggressively discounted products within each category.
+SELECT name, category, mrp, discountPercent
+FROM zepto z1
+WHERE discountPercent > (
+    SELECT AVG(discountPercent)
+    FROM zepto z2
+    WHERE z2.category = z1.category
+)
+ORDER BY category, discountPercent DESC;
+
+
+-- Q7. What is the total potential revenue lost due to out-of-stock products?
+--     Estimates missed revenue per category if out-of-stock items were available.
+SELECT category,
+       ROUND(SUM(discountedSellingPrice * quantity), 2) AS potential_lost_revenue
+FROM zepto
+WHERE outOfStock = TRUE
+GROUP BY category
+ORDER BY potential_lost_revenue DESC;
+
+
+-- Q8. Which category offers the best average value for money (lowest price per gram)?
+--     Helps budget-conscious customers and analysts spot cost-efficient categories.
+SELECT category,
+       ROUND(AVG(discountedSellingPrice / NULLIF(weightInGms, 0)), 4) AS avg_price_per_gram
+FROM zepto
+WHERE weightInGms > 0 AND outOfStock = FALSE
+GROUP BY category
+ORDER BY avg_price_per_gram ASC;
